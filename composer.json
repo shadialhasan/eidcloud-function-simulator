@@ -1,0 +1,30 @@
+{
+  "name": "eidcloud/function-simulator",
+  "description": "AI function calling simulator and tool execution sandbox with interactive terminal replay in pure PHP",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Eng. MHD. Shadi AL-Hasan",
+      "email": "shadi@eidcloud.com",
+      "role": "Author & Maintainer"
+    }
+  ],
+  "require": {
+    "php": ">=8.2.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "EidCloud\\FunctionSimulator\\": "src/"
+    }
+  },
+  "bin": [
+    "bin/eidcloud-sim"
+  ],
+  "scripts": {
+    "test": "php tests/run_tests.php"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "AI function calling simulator and tool execution sandbox with interactive terminal replay in pure PHP",
+  "topics": [
+    "eidcloud",
+    "function-calling",
+    "tool-calling",
+    "agent-simulator",
+    "ai-sandbox",
+    "tui-simulator",
+    "php8"
+  ]
+}

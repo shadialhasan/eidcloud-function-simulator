@@ -1,0 +1,169 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Ensure autoloader is loaded
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
+} else {
+    require_once __DIR__ . '/../autoload.php';
+}
+
+use EidCloud\FunctionSimulator\Simulator;
+use EidCloud\FunctionSimulator\Session\Session;
+use EidCloud\FunctionSimulator\Tools\FaultInjector;
+
+// Terminal colors
+$cReset = "\033[0m";
+$cBold = "\033[1m";
+$cCyan = "\033[36m";
+$cYellow = "\033[33m";
+$cGreen = "\033[32m";
+$cRed = "\033[31m";
+
+function printHelp(): void {
+    global $cBold, $cCyan, $cYellow, $cGreen, $cReset;
+    echo "{$cCyan}{$cBold}eidcloud-sim{$cReset} - AI Function Calling Simulator & Tool Execution Sandbox (PHP 8.2+)\n\n";
+    echo "{$cBold}USAGE:{$cReset}\n";
+    echo "  php bin/eidcloud-sim run [options]\n";
+    echo "  php bin/eidcloud-sim replay <file.json> [options]\n";
+    echo "  php bin/eidcloud-sim list-scenarios\n";
+    echo "  php bin/eidcloud-sim list-tools\n\n";
+
+    echo "{$cBold}RUN OPTIONS:{$cReset}\n";
+    echo "  {$cYellow}--scenario=<name>{$cReset}        Scenario to simulate (default: db-search)\n";
+    echo "                             Available: db-search, math-solve, web-audit\n";
+    echo "  {$cYellow}--visual{$cReset}                 Enable rich terminal TUI visualizer\n";
+    echo "  {$cYellow}--save=<file.json>{$cReset}       Save execution session to a JSON file\n";
+    echo "  {$cYellow}--fault=<type>{$cReset}           Inject synthetic fault:\n";
+    echo "                             timeout, deadlock, missing-param\n";
+    echo "  {$cYellow}--fault-tool=<name>{$cReset}      Target tool for fault injection (default: database)\n\n";
+
+    echo "{$cBold}REPLAY OPTIONS:{$cReset}\n";
+    echo "  {$cYellow}--speed=<rate>{$cReset}           Playback speed multiplier: 1x, 2x, 5x, instant\n\n";
+
+    echo "{$cBold}EXAMPLES:{$cReset}\n";
+    echo "  {$cGreen}php bin/eidcloud-sim run --scenario=db-search --visual{$cReset}\n";
+    echo "  {$cGreen}php bin/eidcloud-sim run --scenario=math-solve --visual --save=math_session.json{$cReset}\n";
+    echo "  {$cGreen}php bin/eidcloud-sim run --scenario=db-search --visual --fault=deadlock{$cReset}\n";
+    echo "  {$cGreen}php bin/eidcloud-sim replay math_session.json --speed=1x{$cReset}\n\n";
+}
+
+$args = array_slice($argv, 1);
+
+if (empty($args) || in_array('--help', $args, true) || in_array('-h', $args, true)) {
+    printHelp();
+    exit(0);
+}
+
+$command = $args[0];
+
+// Parse key-value arguments
+$options = [];
+$positional = [];
+foreach (array_slice($args, 1) as $arg) {
+    if (str_starts_with($arg, '--')) {
+        $clean = substr($arg, 2);
+        if (str_contains($clean, '=')) {
+            [$key, $val] = explode('=', $clean, 2);
+            $options[$key] = $val;
+        } else {
+            $options[$clean] = true;
+        }
+    } else {
+        $positional[] = $arg;
+    }
+}
+
+$faultInjector = new FaultInjector();
+
+// Setup fault injection if requested
+if (isset($options['fault'])) {
+    $faultType = $options['fault'];
+    $faultTool = $options['fault-tool'] ?? 'database';
+
+    switch ($faultType) {
+        case 'timeout':
+            $faultInjector->injectTimeout($faultTool, 2500, "Synthetic timeout: tool '{$faultTool}' exceeded 2000ms threshold.");
+            break;
+        case 'deadlock':
+            $faultInjector->injectDeadlock($faultTool, "Synthetic deadlock: lock wait timeout exceeded in '{$faultTool}'.");
+            break;
+        case 'missing-param':
+            $faultInjector->injectValidationError($faultTool, 'action');
+            break;
+        default:
+            $faultInjector->injectCustomFault($faultTool, "Simulated fault: {$faultType}");
+            break;
+    }
+}
+
+$simulator = new Simulator(faultInjector: $faultInjector);
+
+switch ($command) {
+    case 'run':
+        $scenarioName = $options['scenario'] ?? 'db-search';
+        $visual = isset($options['visual']);
+        $delay = $visual ? 0.05 : 0.0;
+
+        try {
+            $session = $simulator->run($scenarioName, $visual, $delay);
+
+            if (!$visual) {
+                echo "Simulation executed successfully. Steps: " . count($session->getSteps()) . " [ID: " . $session->getId() . "]\n";
+            }
+
+            if (isset($options['save'])) {
+                $savePath = $options['save'];
+                file_put_contents($savePath, $session->toJson(true));
+                echo "{$cGreen}✓ Session saved to {$savePath}{$cReset}\n";
+            }
+        } catch (\Throwable $e) {
+            echo "{$cRed}Error: " . $e->getMessage() . "{$cReset}\n";
+            exit(1);
+        }
+        break;
+
+    case 'replay':
+        $filePath = $positional[0] ?? null;
+        if (!$filePath || !file_exists($filePath)) {
+            echo "{$cRed}Error: Replay session file '{$filePath}' does not exist.{$cReset}\n";
+            exit(1);
+        }
+
+        $speedStr = $options['speed'] ?? '1x';
+        $speed = 1.0;
+        if ($speedStr === 'instant') {
+            $speed = 0.0;
+        } else {
+            $speed = (float)str_replace('x', '', $speedStr);
+            if ($speed <= 0) {
+                $speed = 1.0;
+            }
+        }
+
+        $json = file_get_contents($filePath);
+        $session = Session::fromJson($json);
+        $simulator->replay($session, $speed);
+        break;
+
+    case 'list-scenarios':
+        echo "{$cCyan}{$cBold}Registered Simulation Scenarios:{$cReset}\n";
+        foreach ($simulator->getScenarioRunner()->all() as $name => $scenario) {
+            echo "  - {$cYellow}{$name}{$cReset}: {$scenario->getDescription()}\n";
+        }
+        break;
+
+    case 'list-tools':
+        echo "{$cCyan}{$cBold}Available Sandbox Tools:{$cReset}\n";
+        foreach ($simulator->getToolBox()->all() as $name => $tool) {
+            echo "  - {$cYellow}{$name}{$cReset}: {$tool->getDescription()}\n";
+        }
+        break;
+
+    default:
+        echo "{$cRed}Unknown command: '{$command}'{$cReset}\n";
+        printHelp();
+        exit(1);
+}
